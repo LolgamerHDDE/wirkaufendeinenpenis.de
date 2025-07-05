@@ -1,0 +1,71 @@
+name: Scan PR for Banned Content
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # Needed to leave a comment
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Load banned patterns
+        run: |
+          grep -vE '^\s*#' banned-patterns.txt | grep . > patterns.txt
+
+      - name: Fetch PR diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }} --unified=0 > diff.txt
+
+      - name: Scan and comment if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          match=""
+          while IFS= read -r pattern; do
+            result=$(grep -iE "\+.*$pattern" diff.txt | head -n 1)
+            if [ -n "$result" ]; then
+              match="$result"
+              break
+            fi
+          done < patterns.txt
+
+          if [ -n "$match" ]; then
+            echo "❌ Banned content detected: $match"
+
+            # Escape markdown-sensitive characters
+            clean_line=$(echo "$match" | sed 's/^+//;s/`/\\`/g')
+
+            body="Changes Requested
+
+            The line:
+
+            \`\`\`html
+            $clean_line
+            \`\`\`
+
+            violates the project rule against offensive content.
+
+            > No NSFW, hateful, or offensive material.
+
+            Please remove or rephrase it.
+
+            Once addressed, the PR can be approved."
+
+            curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -nc --arg body "$body" '{body: $body}')" \
+              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"
+
+            exit 1
+          else
+            echo "✅ No banned content found."
+            fi
