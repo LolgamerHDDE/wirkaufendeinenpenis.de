@@ -1,0 +1,15 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Upload Webhook
+        run: |
+          curl -X POST "https://plesk.24fire.de:8443/modules/git/public/web-hook.php?uuid=044fa4e3-284d-1b6c-fcda-938879d4225a"
